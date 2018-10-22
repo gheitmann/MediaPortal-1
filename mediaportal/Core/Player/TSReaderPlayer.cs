@@ -874,8 +874,16 @@ namespace MediaPortal.Player
           {
             if (ppFilter.Value != null)
             {
-              DirectShowUtil.RemoveFilter(_graphBuilder, ppFilter.Value as IBaseFilter);
-              DirectShowUtil.FinalReleaseComObject(ppFilter.Value);
+              try
+              {
+                Log.Debug("TSReaderPlayer: Removing PostProcessFilterVideo - {0}", ppFilter.Value);
+                DirectShowUtil.RemoveFilter(_graphBuilder, ppFilter.Value as IBaseFilter);
+                DirectShowUtil.FinalReleaseComObject(ppFilter.Value);
+              }
+              catch (Exception ex)
+              {
+                Log.Error("TSReaderPlayer: Exception while cleaning PostProcessFilterVideo - {0} {1}", ex.Message, ex.StackTrace);
+              }
             }
           }
           PostProcessFilterVideo.Clear();
@@ -883,8 +891,16 @@ namespace MediaPortal.Player
           {
             if (ppFilter.Value != null)
             {
-              DirectShowUtil.RemoveFilter(_graphBuilder, ppFilter.Value as IBaseFilter);
-              DirectShowUtil.FinalReleaseComObject(ppFilter.Value);
+              try
+              {
+                Log.Debug("TSReaderPlayer: Removing PostProcessFilterAudio - {0}", ppFilter.Value);
+                DirectShowUtil.RemoveFilter(_graphBuilder, ppFilter.Value as IBaseFilter);
+                DirectShowUtil.FinalReleaseComObject(ppFilter.Value);
+              }
+              catch (Exception ex)
+              {
+                Log.Error("TSReaderPlayer: Exception while cleaning PostProcessFilterAudio - {0} {1}", ex.Message, ex.StackTrace);
+              }
             }
           }
           PostProcessFilterAudio.Clear();

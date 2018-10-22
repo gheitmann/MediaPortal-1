@@ -23,6 +23,7 @@ using DirectShowLib;
 using DShowNET.Helper;
 using MediaPortal.Player.PostProcessing;
 using MediaPortal.Profile;
+using MediaPortal.GUI.Library;
 
 namespace MediaPortal.Player.LAV
 {
@@ -155,8 +156,16 @@ namespace MediaPortal.Player.LAV
     {
       if (_baseFilterLavAudio != null)
       {
-        DirectShowUtil.CleanUpInterface(_baseFilterLavAudio);
-        _baseFilterLavAudio = null;
+        try
+        {
+          Log.Debug("LAVEngine: FreePostProcess()");
+          DirectShowUtil.CleanUpInterface(_baseFilterLavAudio);
+          _baseFilterLavAudio = null;
+        }
+        catch (Exception ex)
+        {
+          Log.Error("LAVEngine: FreePostProcess() exception - {0} {1}", ex.Message, ex.StackTrace);
+        }
       }
     }
 
