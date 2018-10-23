@@ -2319,9 +2319,11 @@ namespace DShowNET.Helper
         if (obj != null)
         {
           if (Marshal.IsComObject(obj))
+          {
             Marshal.ReleaseComObject(obj);
+          }
+          obj = null;
         }
-        obj = null;
       }
       catch (Exception)
       {
@@ -2337,6 +2339,7 @@ namespace DShowNET.Helper
         if (obj != null)
         {
           if (Marshal.IsComObject(obj))
+          {
             while (true)
             {
               if (Marshal.ReleaseComObject(obj) > 0)
@@ -2346,10 +2349,11 @@ namespace DShowNET.Helper
               else
               {
                 Marshal.FinalReleaseComObject(obj);
-                obj = null;
                 break;
               }
             }
+          }
+          obj = null;
         }
       }
       catch (Exception)
@@ -2368,8 +2372,8 @@ namespace DShowNET.Helper
           if (Marshal.IsComObject(obj))
           {
             Marshal.FinalReleaseComObject(obj);
-            obj = null;
           }
+          obj = null;
         }
       }
       catch (Exception)
