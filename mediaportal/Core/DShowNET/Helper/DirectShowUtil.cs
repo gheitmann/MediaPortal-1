@@ -2326,7 +2326,7 @@ namespace DShowNET.Helper
       catch (Exception)
       {
         StackTrace st = new StackTrace(true);
-        Log.Error("Exception while releasing COM object (NULL) - stacktrace: {0}", st);
+        Log.Error("Exception DirectShowUtil:ReleaseComObject() while releasing COM object (NULL) - stacktrace: {0}", st);
       }
     }
 
@@ -2355,15 +2355,28 @@ namespace DShowNET.Helper
       catch (Exception)
       {
         StackTrace st = new StackTrace(true);
-        Log.Error("Exception while releasing COM object (NULL) - stacktrace: {0}", st);
+        Log.Error("Exception DirectShowUtil:FinalReleaseComObject() while releasing COM object (NULL) - stacktrace: {0}", st);
       }
     }
 
-    public static void CleanUpInterface(object o)
+    public static void CleanUpInterface(object obj)
     {
-      if (o != null)
-        while (Marshal.ReleaseComObject(o) > 0) ;
-      o = null;
+      try
+      {
+        if (obj != null)
+        {
+          if (Marshal.IsComObject(obj))
+          {
+            Marshal.FinalReleaseComObject(obj);
+            obj = null;
+          }
+        }
+      }
+      catch (Exception)
+      {
+        StackTrace st = new StackTrace(true);
+        Log.Error("Exception DirectShowUtil:CleanUpInterface() while releasing COM object (NULL) - stacktrace: {0}", st);
+      }
     }
   }
 }
