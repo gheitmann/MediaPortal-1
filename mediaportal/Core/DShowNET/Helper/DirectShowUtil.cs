@@ -1758,15 +1758,28 @@ namespace DShowNET.Helper
 
     public static int RemoveFilter(IGraphBuilder graphBuilder, IBaseFilter filter)
     {
+      if (graphBuilder == null || filter == null)
+      {
+        Log.Error("DirectShowUtil:RemoveFilter() - Null pointer error!!");
+        return -2147467261; // E_POINTER	- null pointer error
+      }
+      
       try
       {
-        return graphBuilder.RemoveFilter(filter);
+        if (Marshal.IsComObject(filter))
+        {
+          return graphBuilder.RemoveFilter(filter);
+        }
+        else
+        {
+          Log.Error("DirectShowUtil:RemoveFilter() - Marshal.IsComObject() invalid!!");
+        }
       }
       catch (Exception)
       {
-        Log.Debug("Failed to remove filter");
+        Log.Error("DirectShowUtil:RemoveFilter() - Exception!!");
       }
-      return 0;
+      return -2147467259; //E_FAIL - Unspecified error.
     }
 
     public static void RemoveFilters(IGraphBuilder graphBuilder)
