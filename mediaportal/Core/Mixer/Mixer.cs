@@ -19,6 +19,7 @@
 #endregion
 
 using System;
+using System.Threading;
 using System.Runtime.InteropServices;
 using MediaPortal.ExtensionMethods;
 using MediaPortal.GUI.Library;
@@ -26,7 +27,42 @@ using MediaPortal.Player;
 
 namespace MediaPortal.Mixer
 {
-  public sealed class Mixer : IDisposable
+  public class Key : IDisposable
+  {
+    private readonly object syncObject = new object();
+    private const int TimeoutMaxWait = 50; // milliseconds
+    private object padlock;
+
+    public Key() {}
+    
+    public Key(object locker)
+    {
+      padlock = locker;
+    }
+
+    public void Dispose()
+    {
+      // when this falls out of scope (after a using {...} ), release the lock
+      Monitor.Exit(padlock);
+    }
+    
+    protected Key Lock(int LockTime)
+    {
+      if (Monitor.TryEnter(this.syncObject, LockTime))
+      {
+        return new Key(this.syncObject);
+      }
+      else
+      {
+        Log.Debug("Mixer: KeyLock timeout {0} ms", LockTime);
+        // throw exception, log message, etc.
+        throw new TimeoutException("Mixer:Key failed to acquire the lock.");
+      }
+    }
+    
+  }
+
+  public sealed class Mixer : Key, IDisposable 
   {
     #region Events
 
@@ -39,7 +75,8 @@ namespace MediaPortal.Mixer
 
     public void Close()
     {
-      lock (this)
+      //lock (this)
+      using (Lock(50))
       {
         if (_handle == IntPtr.Zero)
         {
@@ -92,8 +129,9 @@ namespace MediaPortal.Mixer
 
     public void Open(int mixerIndex, bool isDigital, bool resetDevice = false)
     {
-      _isInternalVolumeChange = true;
-      lock (this)
+      //_isInternalVolumeChange = true;
+      //lock (this)
+      using (Lock(50))
       {
         Log.Debug("Mixer: Open(), mixerIndex = {0}, isDigital = {1}, resetDevice = {2}", mixerIndex, isDigital, resetDevice);
         _waveVolume = isDigital;
@@ -179,7 +217,7 @@ namespace MediaPortal.Mixer
                                          MixerFlags.CallbackWindow) !=
             MixerError.None)
           {
-            _isInternalVolumeChange = false;
+            //_isInternalVolumeChange = false;
             throw new InvalidOperationException();
           }
 
@@ -192,7 +230,7 @@ namespace MediaPortal.Mixer
           _volume = (int)GetValue(_componentType, MixerControlType.Volume);
         }
       }
-      _isInternalVolumeChange = false;
+      //_isInternalVolumeChange = false;
     }
 
     private MixerNativeMethods.MixerControlDetails GetControl(MixerComponentType componentType,
@@ -313,34 +351,37 @@ namespace MediaPortal.Mixer
 
     void AudioEndpointVolume_OnVolumeNotification(AudioVolumeNotificationData data)
     {
-      if (data?.MasterVolume == null || _isInternalVolumeChange)
+      if (data?.MasterVolume == null) //_isInternalVolumeChange)
         return;
         
-      //Log.Debug("Mixer: AudioEndpointVolume_OnVolumeNotification");
-      bool wasMuted = _isMuted;
-      int lastVolume = _volume;
-      _isMuted = _audioDefaultDevice.Muted;
-      if (_waveVolume && OSInfo.OSInfo.Win8OrLater())
-      {
-        _isMutedVolume = (int)GetValue(_componentType, MixerControlType.Mute) == 1;
-      }
-      _volume = (int)Math.Round(_audioDefaultDevice.MasterVolume * VolumeMaximum);
-
-      if (wasMuted != _isMuted || lastVolume != _volume)
-      {
-        Log.Debug("Mixer: AudioEndpointVolume change, new muted = {0}, new volume = {1}, old muted = {2}, old volume = {3}", _isMuted, _volume, wasMuted, lastVolume);
-      }
-
-      if (ControlChanged != null && (wasMuted != _isMuted || lastVolume != _volume))
-      {
-        ControlChanged(null, null);
-        if (_waveVolume && OSInfo.OSInfo.Win8OrLater() && (_isMutedVolume != IsMuted))
+      using (Lock(50))
+      { 
+        //Log.Debug("Mixer: AudioEndpointVolume_OnVolumeNotification");
+        bool wasMuted = _isMuted;
+        int lastVolume = _volume;
+        _isMuted = _audioDefaultDevice.Muted;
+        if (_waveVolume && OSInfo.OSInfo.Win8OrLater())
         {
-          SetValue(_mixerControlDetailsMute, _isMuted);
+          _isMutedVolume = (int)GetValue(_componentType, MixerControlType.Mute) == 1;
         }
+        _volume = (int)Math.Round(_audioDefaultDevice.MasterVolume * VolumeMaximum);
+  
+        if (wasMuted != _isMuted || lastVolume != _volume)
+        {
+          Log.Debug("Mixer: AudioEndpointVolume change, new muted = {0}, new volume = {1}, old muted = {2}, old volume = {3}", _isMuted, _volume, wasMuted, lastVolume);
+        }
+  
+        if (ControlChanged != null && (wasMuted != _isMuted || lastVolume != _volume))
+        {
+          ControlChanged(null, null);
+          if (_waveVolume && OSInfo.OSInfo.Win8OrLater() && (_isMutedVolume != IsMuted))
+          {
+            SetValue(_mixerControlDetailsMute, _isMuted);
+          }
+        }
+        
+        if (VolumeHandler.Instance != null) VolumeHandler.Instance.mixer_UpdateVolume();
       }
-      
-      if (VolumeHandler.Instance != null) VolumeHandler.Instance.mixer_UpdateVolume();
     }
     #endregion Methods
 
@@ -350,7 +391,8 @@ namespace MediaPortal.Mixer
     {
       get 
       { 
-        lock (this) 
+        //lock (this) 
+        using (Lock(50))
         {
           //Log.Debug("Mixer: Get IsMuted = {0}", _isMuted);
           return _isMuted; 
@@ -359,6 +401,7 @@ namespace MediaPortal.Mixer
       set
       {
         // lock (this)
+        using (Lock(50))
         {
           _isInternalVolumeChange = true;
           try
@@ -402,7 +445,8 @@ namespace MediaPortal.Mixer
     {
       get 
       { 
-        lock (this) 
+        //lock (this) 
+        using (Lock(50))
         {
           //Log.Debug("Mixer: Get Volume = {0}", _volume);
           return _volume; 
@@ -411,6 +455,7 @@ namespace MediaPortal.Mixer
       set
       {
         //lock (this)
+        using (Lock(50))
         {
           _isInternalVolumeChange = true;
           try
@@ -474,7 +519,9 @@ namespace MediaPortal.Mixer
     public AEDev _audioDefaultDevice;
     private bool _waveVolume;
     private bool _isInternalVolumeChange;
+//    static readonly object _lockObject = new object(); 
 
     #endregion Fields
   }
+  
 }
