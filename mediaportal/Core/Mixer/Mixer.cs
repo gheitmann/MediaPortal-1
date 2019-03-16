@@ -30,8 +30,8 @@ namespace MediaPortal.Mixer
   public class Key : IDisposable
   {
     private readonly object syncObject = new object();
-    private const int TimeoutMaxWait = 50; // milliseconds
     private object padlock;
+    private bool acquiredLock = false;
 
     public Key() {}
     
@@ -43,23 +43,30 @@ namespace MediaPortal.Mixer
     public void Dispose()
     {
       // when this falls out of scope (after a using {...} ), release the lock
+      acquiredLock = false;
       Monitor.Exit(padlock);
     }
     
-    protected Key Lock(int LockTime)
+    protected Key MixerLock(int LockTime)
     {
       if (Monitor.TryEnter(this.syncObject, LockTime))
       {
+        acquiredLock = true;
+        Log.Debug("Mixer: MixerLock acquired {0} ms", LockTime);
         return new Key(this.syncObject);
       }
       else
       {
-        Log.Debug("Mixer: KeyLock timeout {0} ms", LockTime);
+        Log.Error("Mixer: MixerLock timeout {0} ms", LockTime);
         // throw exception, log message, etc.
-        throw new TimeoutException("Mixer:Key failed to acquire the lock.");
+        throw new TimeoutException("Mixer: MixerLock failed to acquire the lock.");
       }
     }
     
+    protected bool IsLocked()
+    {
+      return acquiredLock;
+    }        
   }
 
   public sealed class Mixer : Key, IDisposable 
@@ -75,17 +82,26 @@ namespace MediaPortal.Mixer
 
     public void Close()
     {
-      //lock (this)
-      using (Lock(50))
+      try
       {
-        if (_handle == IntPtr.Zero)
+        lock (this)
         {
-          return;
+          using (MixerLock(lockInfinite))
+          {
+            if (_handle == IntPtr.Zero)
+            {
+              return;
+            }
+    
+            MixerNativeMethods.mixerClose(_handle);
+    
+            _handle = IntPtr.Zero;
+          }
         }
-
-        MixerNativeMethods.mixerClose(_handle);
-
-        _handle = IntPtr.Zero;
+      }
+      catch (Exception ex)
+      {
+        Log.Error($"Mixer: error occured in Close(): {ex}");
       }
     }
 
@@ -129,108 +145,119 @@ namespace MediaPortal.Mixer
 
     public void Open(int mixerIndex, bool isDigital, bool resetDevice = false)
     {
-      //_isInternalVolumeChange = true;
-      //lock (this)
-      using (Lock(50))
+      try
       {
-        Log.Debug("Mixer: Open(), mixerIndex = {0}, isDigital = {1}, resetDevice = {2}", mixerIndex, isDigital, resetDevice);
-        _waveVolume = isDigital;
-        if (isDigital)
+        //_isInternalVolumeChange = true;
+        lock (this)
         {
-          _componentType = MixerComponentType.SourceWave;
-        }
-        else
-        {
-          _componentType = MixerComponentType.DestinationSpeakers;
-        }
-
-        // Use Endpoint Volume API for Vista/Win7 if master volume is selected and always for Win8 to handle muting of master volume
-        if ((OSInfo.OSInfo.VistaOrLater() && _componentType == MixerComponentType.DestinationSpeakers) ||
-            OSInfo.OSInfo.Win8OrLater())
-        {
-          try
+          using (MixerLock(lockInfinite))
           {
-            Log.Debug("Mixer: Open(), Endpoint Volume API for Master");
-            _audioDefaultDevice = new AEDev(resetDevice);
-            if (_audioDefaultDevice != null)
+            Log.Debug("Mixer: Open(), mixerIndex = {0}, isDigital = {1}, resetDevice = {2}", mixerIndex, isDigital, resetDevice);
+            _waveVolume = isDigital;
+            if (isDigital)
             {
-              _audioDefaultDevice.OnVolumeNotification +=
-                new AudioEndpointVolumeNotificationDelegate(AudioEndpointVolume_OnVolumeNotification);
-
-              _isMuted = _audioDefaultDevice.Muted;
-              _volume = (int)Math.Round(_audioDefaultDevice.MasterVolume * VolumeMaximum);
+              _componentType = MixerComponentType.SourceWave;
+            }
+            else
+            {
+              _componentType = MixerComponentType.DestinationSpeakers;
+            }
+    
+            // Use Endpoint Volume API for Vista/Win7 if master volume is selected and always for Win8 to handle muting of master volume
+            if ((OSInfo.OSInfo.VistaOrLater() && _componentType == MixerComponentType.DestinationSpeakers) ||
+                OSInfo.OSInfo.Win8OrLater())
+            {
+              try
+              {
+                Log.Debug("Mixer: Open(), Endpoint Volume API for Master");
+                _audioDefaultDevice = new AEDev(resetDevice);
+                if (_audioDefaultDevice != null)
+                {
+                  _audioDefaultDevice.OnVolumeNotification +=
+                    new AudioEndpointVolumeNotificationDelegate(AudioEndpointVolume_OnVolumeNotification);
+    
+                  _isMuted = _audioDefaultDevice.Muted;
+                  _volume = (int)Math.Round(_audioDefaultDevice.MasterVolume * VolumeMaximum);
+                }
+              }
+              catch (Exception ex)
+              {
+                Log.Error($"Mixer: Open(), Exception in Endpoint Volume API for Master: {ex}");
+                _isMuted = false;
+                _volume = 100;
+              }
+            }
+            else if (OSInfo.OSInfo.VistaOrLater() && _componentType == MixerComponentType.SourceWave)
+            {
+              try
+              {
+                Log.Debug("Mixer: Open(), Endpoint Volume API for Wave");
+                _audioDefaultDevice = new AEDev(resetDevice);
+                if (_audioDefaultDevice != null)
+                {
+                  _audioDefaultDevice.OnVolumeNotification +=
+                    new AudioEndpointVolumeNotificationDelegate(AudioEndpointVolume_OnVolumeNotification);
+                }
+              }
+              catch (Exception ex)
+              {
+                Log.Error($"Mixer: Open(), Exception in Endpoint Volume API for Wave: {ex}");
+              }
+            }
+    
+            // Use Windows Multimedia mixer functions for XP and for Vista and later if wave volume is selected
+            if (_componentType == MixerComponentType.SourceWave || !OSInfo.OSInfo.VistaOrLater())
+            {
+              if (_mixerEventListener == null)
+              {
+                _mixerEventListener = new MixerEventListener();
+                _mixerEventListener.Start();
+              }
+              _mixerEventListener.LineChanged += new MixerEventHandler(OnLineChanged);
+              _mixerEventListener.ControlChanged += new MixerEventHandler(OnControlChanged);
+    
+              MixerNativeMethods.MixerControl mc = new MixerNativeMethods.MixerControl();
+    
+              mc.Size = 0;
+              mc.ControlId = 0;
+              mc.ControlType = MixerControlType.Volume;
+              mc.fdwControl = 0;
+              mc.MultipleItems = 0;
+              mc.ShortName = string.Empty;
+              mc.Name = string.Empty;
+              mc.Minimum = 0;
+              mc.Maximum = 0;
+              mc.Reserved = 0;
+    
+              IntPtr handle = IntPtr.Zero;
+    
+              if (
+                MixerNativeMethods.mixerOpen(ref handle, mixerIndex, _mixerEventListener.Handle, 0,
+                                             MixerFlags.CallbackWindow) !=
+                MixerError.None)
+              {
+                //_isInternalVolumeChange = false;
+                throw new InvalidOperationException();
+              }
+    
+              _handle = handle;
+    
+              _mixerControlDetailsVolume = GetControl(_componentType, MixerControlType.Volume);
+              _mixerControlDetailsMute = GetControl(_componentType, MixerControlType.Mute);
+    
+              _isMuted = (int)GetValue(_componentType, MixerControlType.Mute) == 1;
+              _volume = (int)GetValue(_componentType, MixerControlType.Volume);
             }
           }
-          catch (Exception ex)
-          {
-            Log.Error($"Mixer: Open(), Exception in Endpoint Volume API for Master: {ex}");
-            _isMuted = false;
-            _volume = 100;
-          }
         }
-        else if (OSInfo.OSInfo.VistaOrLater() && _componentType == MixerComponentType.SourceWave)
-        {
-          try
-          {
-            Log.Debug("Mixer: Open(), Endpoint Volume API for Wave");
-            _audioDefaultDevice = new AEDev(resetDevice);
-            if (_audioDefaultDevice != null)
-            {
-              _audioDefaultDevice.OnVolumeNotification +=
-                new AudioEndpointVolumeNotificationDelegate(AudioEndpointVolume_OnVolumeNotification);
-            }
-          }
-          catch (Exception ex)
-          {
-            Log.Error($"Mixer: Open(), Exception in Endpoint Volume API for Wave: {ex}");
-          }
-        }
-
-        // Use Windows Multimedia mixer functions for XP and for Vista and later if wave volume is selected
-        if (_componentType == MixerComponentType.SourceWave || !OSInfo.OSInfo.VistaOrLater())
-        {
-          if (_mixerEventListener == null)
-          {
-            _mixerEventListener = new MixerEventListener();
-            _mixerEventListener.Start();
-          }
-          _mixerEventListener.LineChanged += new MixerEventHandler(OnLineChanged);
-          _mixerEventListener.ControlChanged += new MixerEventHandler(OnControlChanged);
-
-          MixerNativeMethods.MixerControl mc = new MixerNativeMethods.MixerControl();
-
-          mc.Size = 0;
-          mc.ControlId = 0;
-          mc.ControlType = MixerControlType.Volume;
-          mc.fdwControl = 0;
-          mc.MultipleItems = 0;
-          mc.ShortName = string.Empty;
-          mc.Name = string.Empty;
-          mc.Minimum = 0;
-          mc.Maximum = 0;
-          mc.Reserved = 0;
-
-          IntPtr handle = IntPtr.Zero;
-
-          if (
-            MixerNativeMethods.mixerOpen(ref handle, mixerIndex, _mixerEventListener.Handle, 0,
-                                         MixerFlags.CallbackWindow) !=
-            MixerError.None)
-          {
-            //_isInternalVolumeChange = false;
-            throw new InvalidOperationException();
-          }
-
-          _handle = handle;
-
-          _mixerControlDetailsVolume = GetControl(_componentType, MixerControlType.Volume);
-          _mixerControlDetailsMute = GetControl(_componentType, MixerControlType.Mute);
-
-          _isMuted = (int)GetValue(_componentType, MixerControlType.Mute) == 1;
-          _volume = (int)GetValue(_componentType, MixerControlType.Volume);
-        }
+        //_isInternalVolumeChange = false;
       }
-      //_isInternalVolumeChange = false;
+      catch (Exception ex)
+      {
+        Log.Error($"Mixer: error occured in Open(): {ex}");
+        _isMuted = false;
+        _volume = 100;
+      }
     }
 
     private MixerNativeMethods.MixerControlDetails GetControl(MixerComponentType componentType,
@@ -351,36 +378,51 @@ namespace MediaPortal.Mixer
 
     void AudioEndpointVolume_OnVolumeNotification(AudioVolumeNotificationData data)
     {
-      if (data?.MasterVolume == null) //_isInternalVolumeChange)
-        return;
-        
-      using (Lock(50))
-      { 
-        //Log.Debug("Mixer: AudioEndpointVolume_OnVolumeNotification");
-        bool wasMuted = _isMuted;
-        int lastVolume = _volume;
-        _isMuted = _audioDefaultDevice.Muted;
-        if (_waveVolume && OSInfo.OSInfo.Win8OrLater())
-        {
-          _isMutedVolume = (int)GetValue(_componentType, MixerControlType.Mute) == 1;
-        }
-        _volume = (int)Math.Round(_audioDefaultDevice.MasterVolume * VolumeMaximum);
-  
-        if (wasMuted != _isMuted || lastVolume != _volume)
-        {
-          Log.Debug("Mixer: AudioEndpointVolume change, new muted = {0}, new volume = {1}, old muted = {2}, old volume = {3}", _isMuted, _volume, wasMuted, lastVolume);
-        }
-  
-        if (ControlChanged != null && (wasMuted != _isMuted || lastVolume != _volume))
-        {
-          ControlChanged(null, null);
-          if (_waveVolume && OSInfo.OSInfo.Win8OrLater() && (_isMutedVolume != IsMuted))
+      try
+      {
+        if ((data?.MasterVolume == null) || IsLocked()) //_isInternalVolumeChange)
+          return;
+          
+        using (MixerLock(lockTimeout))
+        { 
+          //Log.Debug("Mixer: AudioEndpointVolume_OnVolumeNotification");
+          bool wasMuted = _isMuted;
+          int lastVolume = _volume;
+                  
+          bool isMutedMaster = _audioDefaultDevice.Muted;
+          if (_waveVolume)
           {
-            SetValue(_mixerControlDetailsMute, _isMuted);
+            _isMuted = (int)GetValue(_componentType, MixerControlType.Mute) == 1;
+            _volume = (int)GetValue(_componentType, MixerControlType.Volume);
           }
+          else
+          {
+            _isMuted = _audioDefaultDevice.Muted;
+            _volume = (int)Math.Round(_audioDefaultDevice.MasterVolume * VolumeMaximum);
+          }
+  
+          if (wasMuted != _isMuted || lastVolume != _volume)
+          {
+            Log.Debug("Mixer: AudioEndpointVolume change, new muted = {0}, new volume = {1}, old muted = {2}, old volume = {3}, isWave = {4}", _isMuted, _volume, wasMuted, lastVolume, _waveVolume);
+          }
+    
+          if (ControlChanged != null && (wasMuted != _isMuted || 
+                                         lastVolume != _volume || 
+                                         (_waveVolume && OSInfo.OSInfo.Win8OrLater() && (isMutedMaster != _isMuted)) ))
+          {
+            ControlChanged(null, null);
+            if (_waveVolume && OSInfo.OSInfo.Win8OrLater() && (isMutedMaster != _isMuted))
+            {
+              SetValue(_mixerControlDetailsMute, isMutedMaster);
+            }
+          }
+          
+          if (VolumeHandler.Instance != null) VolumeHandler.Instance.mixer_UpdateVolume();
         }
-        
-        if (VolumeHandler.Instance != null) VolumeHandler.Instance.mixer_UpdateVolume();
+      }
+      catch (Exception ex)
+      {
+        Log.Error($"Mixer: error occured in AudioEndpointVolume_OnVolumeNotification(): {ex}");
       }
     }
     #endregion Methods
@@ -391,8 +433,7 @@ namespace MediaPortal.Mixer
     {
       get 
       { 
-        //lock (this) 
-        using (Lock(50))
+        lock (this) 
         {
           //Log.Debug("Mixer: Get IsMuted = {0}", _isMuted);
           return _isMuted; 
@@ -400,12 +441,11 @@ namespace MediaPortal.Mixer
       }
       set
       {
-        // lock (this)
-        using (Lock(50))
+        try
         {
-          _isInternalVolumeChange = true;
-          try
+          using (MixerLock(lockTimeout))
           {
+            //_isInternalVolumeChange = true;
             if (value != _isMuted)
             {
               Log.Debug("Mixer: Set new IsMuted = {0}, old IsMuted = {1}", value, _isMuted);
@@ -430,12 +470,12 @@ namespace MediaPortal.Mixer
               }
             }
             if (VolumeHandler.Instance != null) VolumeHandler.Instance.mixer_UpdateVolume();
+            //_isInternalVolumeChange = false;
           }
-          catch (Exception ex)
-          {
-            Log.Error($"Mixer: error occured in IsMuted: {ex}");
-          }
-          _isInternalVolumeChange = false;
+        }
+        catch (Exception ex)
+        {
+          Log.Error($"Mixer: error occured in IsMuted(): {ex}");
         }
       }
     }
@@ -445,8 +485,7 @@ namespace MediaPortal.Mixer
     {
       get 
       { 
-        //lock (this) 
-        using (Lock(50))
+        lock (this) 
         {
           //Log.Debug("Mixer: Get Volume = {0}", _volume);
           return _volume; 
@@ -454,12 +493,11 @@ namespace MediaPortal.Mixer
       }
       set
       {
-        //lock (this)
-        using (Lock(50))
+        try
         {
-          _isInternalVolumeChange = true;
-          try
+          using (MixerLock(lockTimeout))
           {
+            //_isInternalVolumeChange = true;
             if (value != _volume)
             {
               Log.Debug("Mixer: Set new Volume = {0}, old Volume = {1}", value, _volume);
@@ -484,12 +522,12 @@ namespace MediaPortal.Mixer
               }
             }
             if (VolumeHandler.Instance != null) VolumeHandler.Instance.mixer_UpdateVolume();
+            //_isInternalVolumeChange = false;
           }
-          catch (Exception ex)
-          {
-            Log.Error($"Mixer: error occured in Volume: {ex}");
-          }
-          _isInternalVolumeChange = false;
+        }
+        catch (Exception ex)
+        {
+          Log.Error($"Mixer: error occured in Volume(): {ex}");
         }
       }
     }
@@ -511,15 +549,16 @@ namespace MediaPortal.Mixer
     private MixerComponentType _componentType = MixerComponentType.DestinationSpeakers;
     private IntPtr _handle;
     private bool _isMuted;
-    private bool _isMutedVolume;
+//    private bool _isMutedVolume;
     private static MixerEventListener _mixerEventListener;
     private int _volume;
     private MixerNativeMethods.MixerControlDetails _mixerControlDetailsVolume;
     private MixerNativeMethods.MixerControlDetails _mixerControlDetailsMute;
     public AEDev _audioDefaultDevice;
     private bool _waveVolume;
-    private bool _isInternalVolumeChange;
-//    static readonly object _lockObject = new object(); 
+//    private bool _isInternalVolumeChange;
+    private const int lockTimeout = 50; // milliseconds
+    private const int lockInfinite = System.Threading.Timeout.Infinite;
 
     #endregion Fields
   }
