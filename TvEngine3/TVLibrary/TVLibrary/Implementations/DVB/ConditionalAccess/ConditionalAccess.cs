@@ -134,15 +134,12 @@ namespace TvLibrary.Implementations.DVB
         if (isDVBC || isDVBS || isDVBT)
         {
           Log.Log.WriteFile("Check for TBS");
-
-          // Lookup device index of current card. only counting KNC cards by device path
-          uint deviceIndex = (uint)Turbosight.GetDeviceIndex(card);
-          _turbosight = new Turbosight(tunerFilter, deviceIndex);
+          _turbosight = new Turbosight(tunerFilter, card.DevicePath);
           if (_turbosight.IsTurbosight)
           {
-              this._diSEqCMotor = new DiSEqCMotor(_turbosight);
-              _ciMenu = _turbosight;
-              return;
+            this._diSEqCMotor = new DiSEqCMotor(_turbosight);
+            _ciMenu = _turbosight;
+            return;
           }
           Release.DisposeToNull(ref _turbosight);
             
@@ -441,7 +438,7 @@ namespace TvLibrary.Implementations.DVB
 
         if (_turbosight != null)
         {
-            return _turbosight.IsCamReady();
+          return _turbosight.IsCamReady();
         }
         if (_knc != null)
         {
@@ -497,8 +494,7 @@ namespace TvLibrary.Implementations.DVB
           return;
         if (_turbosight != null)
         {
-            bool flag;
-            _turbosight.ResetCi(out flag);
+          _turbosight.ResetCi();
         }
         if (_digitalEveryWhere != null)
         {
@@ -693,7 +689,7 @@ namespace TvLibrary.Implementations.DVB
 
         if (_turbosight != null)
         {
-            return _turbosight.SendPmt(ListManagementType.Only, CommandIdType.Descrambling, context.PMT, context.PMTLength);
+          return _turbosight.SendPmt(ListManagementType.Only, CommandIdType.Descrambling, context.PMT, context.PMTLength);
         }
 
         if (_winTvCiModule != null)
@@ -1167,6 +1163,7 @@ namespace TvLibrary.Implementations.DVB
       Release.Dispose(_twinhan);
       Release.Dispose(_profred);
       Release.Dispose(_TeVii);
+      Release.Dispose(_turbosight);
     }
 
     #endregion
