@@ -582,13 +582,13 @@ Section "MediaPortal core files (required)" SecCore
   File "${git_ROOT}\Packages\Sqlite.3.21.0\Sqlite.dll"
   ; Bass Core
   SetOutPath "$MPdir.Base\"
-  File "${git_ROOT}\Packages\BASS.2.4.12.1\bass.dll"
+  File "${git_ROOT}\Packages\BASS.2.4.12.2\bass.dll"
   File "${git_ROOT}\Packages\BASS.NET.2.4.12.5\lib\net40\Bass.Net.dll"
   File "${git_ROOT}\Packages\BassRegistration.2.4.12.5\lib\net40\BassRegistration.dll"
   File "${git_ROOT}\Packages\System.Management.Automation.6.1.7601.17515\lib\net40\System.Management.Automation.dll"
   ; Bass Addons
   SetOutPath "$MPdir.Base\"
-  File "${git_ROOT}\Packages\bass.asio.1.3.1\bassasio.dll"
+  File "${git_ROOT}\Packages\BASS.ASIO.1.3.1\content\native\x86\bassasio.dll"
   File "${git_ROOT}\Packages\bass.fx.2.4.11.1\bass_fx.dll"
   File "${git_ROOT}\Packages\bass.mix.2.4.8.0\bassmix.dll"
   File "${git_ROOT}\Packages\bass.vst.2.4.5\bass_vst.dll"
