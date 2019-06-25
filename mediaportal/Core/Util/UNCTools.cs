@@ -30,6 +30,7 @@ namespace MediaPortal.Util
         static extern bool InternetGetConnectedState(ref ConnectionStatusEnum flags, int dw);
 
         static string HostDetectMethod = "Ping";
+        private static int UNCTimeOut = 1500;
 
         /// <summary>
         /// enum to hold the possible connection states
@@ -52,6 +53,7 @@ namespace MediaPortal.Util
           using (Profile.Settings xmlreader = new Profile.MPSettings())
           {
             HostDetectMethod = xmlreader.GetValueAsString("general", "HostDetectMethod", "Ping");
+            UNCTimeOut = xmlreader.GetValueAsInt("general", "UNCTimeOut", 1500);
           }
         }
 
@@ -519,7 +521,7 @@ namespace MediaPortal.Util
                 {
                     var t1 = Task.Factory.StartNew(_ => DnsReverseLookup(strHost_or_IP),
                                                         TaskCreationOptions.AttachedToParent)
-                                         .TimeoutAfter(1000)
+                                         .TimeoutAfter(UNCTimeOut)
                                          .ContinueWith(antecedent =>
                                          {
                                              if (!(antecedent.IsCanceled || antecedent.IsFaulted))
