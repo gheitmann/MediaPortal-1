@@ -190,7 +190,11 @@ ${Index}:
   !insertmacro FontName "$FONT_DIR\${FontFileName}"
   pop $R2
   IfErrors 0 "${Index}-Remove"
-    MessageBox MB_OK "$R2"
+	DetailPrint "[ERROR] InstallTTFFont"
+	DetailPrint "[ERROR]     error: $R2"
+	DetailPrint "[ERROR]     FontFile: ${FontFile}"
+	DetailPrint "[ERROR]     FontFileName: ${FontFileName}"
+	DetailPrint "[ERROR]     Index: ${Index}"
     goto "${Index}-End"
     
 "${Index}-Remove:"
